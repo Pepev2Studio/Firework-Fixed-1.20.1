@@ -1,0 +1,125 @@
+name: Build mod jar
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create project files
+        run: |
+          mkdir -p src/main/java/dev/magiccc/mixin src/main/resources
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  maven { url 'https://maven.fabricmc.net/' }
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          rootProject.name = 'firework-fixed'
+          EOF
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2G
+          minecraft_version=1.20.1
+          yarn_mappings=1.20.1+build.10
+          loader_version=0.15.11
+          fabric_version=0.92.2+1.20.1
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'fabric-loom' version '1.5-SNAPSHOT'
+          }
+
+          version = '1.0.0'
+          group = 'dev.magiccc'
+          base { archivesName = 'firework-fixed-mc1.20.1' }
+
+          repositories {
+              maven { url 'https://maven.fabricmc.net/' }
+          }
+
+          dependencies {
+              minecraft "com.mojang:minecraft:${project.minecraft_version}"
+              mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+              modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+          }
+
+          tasks.withType(JavaCompile).configureEach {
+              it.options.release = 17
+          }
+
+          java {
+              sourceCompatibility = JavaVersion.VERSION_17
+              targetCompatibility = JavaVersion.VERSION_17
+          }
+          EOF
+          cat > src/main/resources/fabric.mod.json <<'EOF'
+          {
+            "schemaVersion": 1,
+            "id": "firework-fixed",
+            "version": "1.0.0",
+            "name": "Firework Fixed",
+            "description": "Prevents fireworks from being used on blocks while flying with Elytra, ensuring they are always used for boosting.",
+            "authors": ["Magiccc"],
+            "license": "CC0-1.0",
+            "environment": "*",
+            "mixins": ["firework-fixed.mixins.json"],
+            "depends": {
+              "fabricloader": ">=0.14.2",
+              "minecraft": "1.20.1",
+              "java": ">=17",
+              "fabric-api": "*"
+            }
+          }
+          EOF
+          cat > src/main/resources/firework-fixed.mixins.json <<'EOF'
+          {
+            "required": true,
+            "package": "dev.magiccc.mixin",
+            "compatibilityLevel": "JAVA_17",
+            "mixins": ["FireworkRocketItemMixin"],
+            "injectors": {
+              "defaultRequire": 1
+            }
+          }
+          EOF
+          cat > src/main/java/dev/magiccc/mixin/FireworkRocketItemMixin.java <<'EOF'
+          package dev.magiccc.mixin;
+
+          import net.minecraft.entity.player.PlayerEntity;
+          import net.minecraft.item.FireworkRocketItem;
+          import net.minecraft.item.ItemUsageContext;
+          import net.minecraft.util.ActionResult;
+          import org.spongepowered.asm.mixin.Mixin;
+          import org.spongepowered.asm.mixin.injection.At;
+          import org.spongepowered.asm.mixin.injection.Inject;
+          import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+          @Mixin(FireworkRocketItem.class)
+          public abstract class FireworkRocketItemMixin {
+              @Inject(method = "useOnBlock", at = @At("HEAD"), cancellable = true, require = 0)
+              private void firework_fixed$passWhileFlying(ItemUsageContext context, CallbackInfoReturnable<ActionResult> cir) {
+                  PlayerEntity player = context.getPlayer();
+                  if (player != null && player.isFallFlying()) {
+                      cir.setReturnValue(ActionResult.PASS);
+                  }
+              }
+          }
+          EOF
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.8
+      - name: Build
+        run: gradle build --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firework-fixed-mc1.20.1
+          path: build/libs/*.jar
